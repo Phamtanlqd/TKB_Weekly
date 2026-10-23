@@ -1,0 +1,15 @@
+export const DAYS=[{n:2,label:"Thứ 2"},{n:3,label:"Thứ 3"},{n:4,label:"Thứ 4"},{n:5,label:"Thứ 5"},{n:6,label:"Thứ 6"},{n:7,label:"Thứ 7"}];
+export const PERIODS=[{period:1,start:"07:00",end:"07:45"},{period:2,start:"07:50",end:"08:35"},{period:3,start:"08:50",end:"09:35"},{period:4,start:"09:45",end:"10:30"},{period:5,start:"10:35",end:"11:20"},{period:6,start:"13:30",end:"14:15"},{period:7,start:"14:20",end:"15:05"},{period:8,start:"15:15",end:"16:00"}];
+export const SUBJECT_COLORS={"TOAN":["#e8efff","#2563eb"],"TOÁN":["#e8efff","#2563eb"],"TIN HOC":["#e0f2fe","#0284c7"],"TIN HỌC":["#e0f2fe","#0284c7"],"HOA HOC":["#ffedd5","#ea580c"],"HÓA HỌC":["#ffedd5","#ea580c"],"VAN HOC":["#f3e8ff","#9333ea"],"VĂN HỌC":["#f3e8ff","#9333ea"],"SINH HOC":["#dcfce7","#16a34a"],"SINH HỌC":["#dcfce7","#16a34a"],"VAT LY":["#fce7f3","#db2777"],"VẬT LÝ":["#fce7f3","#db2777"],"LICH SU":["#fef3c7","#b45309"],"LỊCH SỬ":["#fef3c7","#b45309"],"GDQP":["#e2e8f0","#475569"],"GD THỂ CHẤT":["#d1fae5","#047857"]};
+export const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+export const norm=s=>String(s??"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/đ/g,"d").replace(/Đ/g,"D").toLowerCase().trim();
+export const uniq=a=>[...new Set(a.filter(Boolean))].sort((x,y)=>String(x).localeCompare(String(y),"vi"));
+export const fmtDay=n=>DAYS.find(d=>d.n===Number(n))?.label||`Thứ ${n}`;
+export const periodNow=(date=new Date())=>{let t=date.getHours()*60+date.getMinutes();return PERIODS.find(p=>{let [sh,sm]=p.start.split(":").map(Number),[eh,em]=p.end.split(":").map(Number);return t>=sh*60+sm&&t<=eh*60+em})||null};
+export const nextPeriod=(date=new Date())=>{let t=date.getHours()*60+date.getMinutes();return PERIODS.find(p=>{let [h,m]=p.start.split(":").map(Number);return h*60+m>t})||null};
+export const toast=(message,type="success")=>{const root=document.querySelector("#toastContainer");if(!root)return;const id=`t${Date.now()}`;root.insertAdjacentHTML("beforeend",`<div id="${id}" class="toast align-items-center text-bg-${type} border-0" role="status"><div class="d-flex"><div class="toast-body">${esc(message)}</div><button class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div></div>`);if(window.bootstrap)new bootstrap.Toast(document.getElementById(id),{delay:3200}).show();else{const el=document.getElementById(id);el.classList.add("show");setTimeout(()=>el.remove(),3200)}};
+export const initials=name=>String(name||"?").split(/\s+/).slice(-2).map(x=>x[0]||"").join("").toUpperCase();
+export const subjectColor=s=>SUBJECT_COLORS[String(s||"").toUpperCase()]||["#e8efff","#2563eb"];
+export const currentDay=()=>{const d=new Date().getDay();return d===0?7:d+1};
+export const recordKey=r=>`${r.teacher}|${r.class}|${r.day}|${r.period}|${r.subject}`;
+export function downloadBlob(blob,name){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
