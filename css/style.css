@@ -13,3 +13,12 @@ body.dark .lesson{filter:brightness(.8)}body.dark .metric-icon.blue{background:#
 .week-status:empty{display:none}.week-status .week-pill{display:inline-flex;padding:4px 9px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-weight:700}
 .week-status .week-actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
 @media(max-width:900px){.heading-actions{flex-wrap:wrap}.week-picker-label{order:-2}.copy-label{display:none}}
+/* V2.3 import studio: alternate spreadsheet-like rendering */
+.excel-view .timetable{border-collapse:collapse!important;background:#fff;color:#1f2937}
+.excel-view .timetable th,.excel-view .timetable td{border:1px solid #9ca3af!important;border-radius:0!important;min-width:100px}
+.excel-view .timetable th{background:#e5eefb!important;color:#111827!important}
+.excel-view .timetable .lesson{border-radius:0!important;box-shadow:none!important;border:0!important;background:transparent!important;color:#111827!important;min-height:58px}
+.excel-view .timetable .lesson strong{font-weight:600}
+.excel-view .timetable .lesson small{color:#4b5563!important}
+.excel-view .timetable .period-cell{background:#f3f4f6;font-weight:700}
+#teacherSession,#classSession{max-width:160px}

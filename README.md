@@ -1,18 +1,12 @@
-# Smart Timetable V2.1 — bản sửa TKB tuần 7
+# Smart Timetable V2.3 — THPT Chuyên Lê Quý Đôn
 
-Khuyến nghị chạy GitHub Pages hoặc localhost. Chạy cục bộ: `python -m http.server 8000`, mở `http://localhost:8000`. Không mở trực tiếp bằng `file://` vì trình duyệt chặn ES Modules.
+Ứng dụng tra cứu thời khóa biểu theo tuần, hỗ trợ TKB giáo viên, TKB lớp buổi sáng và TKB lớp buổi chiều. Gói này đã được nạp dữ liệu mẫu tuần 7 từ ba tệp Excel người dùng cung cấp.
 
-GitHub Pages: đưa toàn bộ NỘI DUNG thư mục này lên root nhánh `main`; bật Settings → Pages → Deploy from a branch → `main` → `/(root)`.
+## Chạy thử
+- Giải nén thư mục và mở bằng một máy chủ tĩnh (ví dụ GitHub Pages hoặc VS Code Live Server).
+- Chọn tuần 7. TKB lớp có bộ chọn buổi sáng/chiều; TKB giáo viên có bộ chọn buổi sáng/chiều.
+- Bấm “Chế độ bảng Excel” để chuyển giữa giao diện hiện đại và bảng dạng Excel.
+- Để nhập tuần khác, bấm “Cập nhật TKB” và chọn cùng lúc ba tệp Excel: giáo viên sáng, lớp sáng, lớp chiều.
 
-Bản sửa: dữ liệu tuần 7 thực từ file Excel đã cung cấp (814 bản ghi); thêm fallback dữ liệu nhúng nếu JSON lỗi; bảng TKB hiển thị 8 tiết; cập nhật phiên bản cache service worker.
-
-Cập nhật: nhấn “Cập nhật TKB”, chọn Excel, chọn thay thế hoặc gộp dữ liệu.
-
-
-## Smart Timetable V2.2 — Quản lý TKB theo tuần
-- Chọn tuần 1–52 tại thanh công cụ phía trên.
-- Mỗi tuần có bộ dữ liệu riêng; nhập Excel sẽ cập nhật tuần đang chọn, không ghi đè tuần khác.
-- Dữ liệu được lưu trong localStorage của trình duyệt hiện tại và tồn tại sau khi tải lại trang trên cùng thiết bị/trình duyệt.
-- Có nút sao chép tuần trước sang tuần đang chọn và xóa dữ liệu riêng của tuần.
-- Vì đây là Frontend Only/GitHub Pages, dữ liệu chưa tự đồng bộ giữa thiết bị hoặc người dùng khác. Muốn đồng bộ toàn trường cần backend/Google Sheets.
-- Khi nâng cấp, thay thế các tệp trong repository bằng nội dung thư mục `smart-timetable-v2-fixed`, giữ nguyên cấu trúc thư mục ở root.
+## Đồng bộ toàn trường
+Xem `README_V23_TRIEN_KHAI.md` để cấu hình Google Sheets và Google Apps Script. Đồng bộ cloud chưa được kiểm thử bằng tài khoản Google thực của nhà trường; cần cấu hình Spreadsheet ID, token và Web App URL trước khi dùng.
