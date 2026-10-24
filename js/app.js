@@ -1,34 +1,293 @@
-import {loadInitialData,parseWorkbook,mergeUpdates} from "./data-loader.js";
-import {renderDashboard} from "./dashboard.js";
-import {renderTeacher} from "./teacher.js";
-import {renderClass} from "./class.js";
-import {bindSearch} from "./search.js";
-import {exportPdf,exportExcel,downloadPng} from "./export.js";
-import {PERIODS,periodNow,nextPeriod,currentDay,fmtDay,uniq,esc,toast} from "./utils.js";
-import {CLOUD_API_URL,ADMIN_TOKEN} from "./cloud-config.js";
-import {parseTimetableFiles} from "./import-studio.js";
-let state={records:[],meta:{},charts:[],view:"dashboard",errors:[],week:7,weeklyStore:{}};
-const WEEK_STORE_KEY="smart-timetable-weekly-v2.4";
-const root=document.querySelector("#viewContainer"),sidebar=document.querySelector("#sidebar");
-const titles={dashboard:["Dashboard","Tổng quan thời khóa biểu tuần"],teacher:["TKB Giáo viên","Tra cứu và theo dõi lịch giảng dạy"],class:["TKB Lớp","Thời khóa biểu theo lớp, môn và giáo viên"],stats:["Thống kê","Phân tích phân bổ tiết học"],rooms:["Phòng học","Tình trạng sử dụng phòng theo tiết"],errors:["Kiểm tra lỗi","Phát hiện xung đột và dữ liệu chưa đầy đủ"],settings:["Cài đặt","Quản lý dữ liệu và tùy chọn ứng dụng"]};
-async function init(){state.meta=await loadInitialData();state.week=Number(state.meta.week)||7;try{state.weeklyStore=JSON.parse(localStorage.getItem(WEEK_STORE_KEY)||"{}")}catch{state.weeklyStore={}};if(!state.weeklyStore[state.week]){state.weeklyStore[state.week]={records:state.meta.records||[],meta:{sourceFile:"Dữ liệu mẫu",updatedAt:null}};saveWeeklyStore()}if(CLOUD_API_URL){try{const cloud=await cloudGet(state.week);if(cloud?.ok&&Array.isArray(cloud.records)){state.weeklyStore[state.week]={records:cloud.records,meta:cloud.meta||{sourceFile:"Google Sheets"}};saveWeeklyStore();state.meta={...state.meta,...cloud.meta};}}catch(err){console.warn("Cloud chưa kết nối, dùng bản lưu cục bộ",err)}}loadWeek(state.week);const weekSelect=document.querySelector("#weekSelect");weekSelect.value=String(state.week);weekSelect.onchange=()=>switchWeek(Number(weekSelect.value));document.querySelector("#copyPreviousWeek").onclick=copyPreviousWeek;const saved=localStorage.getItem("stt-theme");if(saved==="dark")document.body.classList.add("dark");const schoolNameEl=document.querySelector("#schoolName");if(schoolNameEl)schoolNameEl.textContent=state.meta.school||"Smart Timetable";const weekNumberEl=document.querySelector("#weekNumber");if(weekNumberEl)weekNumberEl.textContent=state.meta.week||7;document.querySelector("#themeToggle").onclick=()=>{document.body.classList.toggle("dark");localStorage.setItem("stt-theme",document.body.classList.contains("dark")?"dark":"light");render()};document.querySelector("#mobileMenu").onclick=()=>sidebar.classList.toggle("open");document.querySelectorAll(".nav-link").forEach(b=>b.onclick=()=>navigate(b.dataset.view));document.querySelector("#updateBtn").onclick=()=>document.querySelector("#fileInput").click();document.querySelector("#fileInput").onchange=updateFile;bindSearch(document.querySelector("#globalSearch"),document.querySelector("#searchResults"),state.records,openSearchResult);document.addEventListener("keydown",e=>{if(e.key==="Escape")sidebar.classList.remove("open")});clock();setInterval(clock,1000);if("serviceWorker"in navigator&&location.protocol.startsWith("http"))navigator.serviceWorker.register("./sw.js").catch(()=>{});handleHash();render()}
-function saveWeeklyStore(){try{localStorage.setItem(WEEK_STORE_KEY,JSON.stringify(state.weeklyStore));return true}catch(e){toast("Không lưu được dữ liệu tuần: bộ nhớ trình duyệt có thể đã đầy.","danger");console.error(e);return false}}
-function loadWeek(week){state.week=week;const entry=state.weeklyStore[week];state.records=entry?.records||[];state.meta={...state.meta,...(entry?.meta||{}),week};document.querySelector("#weekNumber").textContent=week;document.querySelector("#pageSubtitle").textContent=(titles[state.view]?.[1]||"")+` · Tuần ${week}`;updateWeekStatus();bindSearch(document.querySelector("#globalSearch"),document.querySelector("#searchResults"),state.records,openSearchResult);render()}
-function persistCurrentWeek(){state.weeklyStore[state.week]={records:state.records,meta:{sourceFile:state.meta.sourceFile||"",updatedAt:state.meta.updatedAt||new Date().toISOString()}};saveWeeklyStore();updateWeekStatus()}
-function updateWeekStatus(){const el=document.querySelector("#weekStatus");if(!el)return;const entry=state.weeklyStore[state.week];const count=(entry?.records||[]).length;const updated=entry?.meta?.updatedAt?new Date(entry.meta.updatedAt).toLocaleString("vi-VN"):"chưa có lần cập nhật";el.innerHTML=`<span class="week-pill">Tuần ${state.week}</span><span>${count.toLocaleString("vi-VN")} bản ghi</span><span>·</span><span>${count?"Cập nhật: "+esc(updated):"Chưa có TKB cho tuần này"}</span><span class="week-actions"><button class="btn btn-sm btn-outline-primary" id="weekImportBtn"><i class="bi bi-upload"></i> Nhập TKB tuần ${state.week}</button><button class="btn btn-sm btn-outline-danger" id="weekClearBtn"><i class="bi bi-trash"></i> Xóa TKB tuần</button></span>`;el.querySelector("#weekImportBtn").onclick=()=>document.querySelector("#fileInput").click();el.querySelector("#weekClearBtn").onclick=()=>{if(confirm(`Xóa dữ liệu TKB tuần ${state.week}?`)){delete state.weeklyStore[state.week];saveWeeklyStore();state.records=[];state.meta.week=state.week;loadWeek(state.week);toast(`Đã xóa TKB tuần ${state.week}`)}}}
-async function switchWeek(week){if(!Number.isInteger(week)||week<1||week>52)return;if(CLOUD_API_URL){try{const cloud=await cloudGet(week);if(cloud?.ok&&Array.isArray(cloud.records)){state.weeklyStore[week]={records:cloud.records,meta:cloud.meta||{sourceFile:"Google Sheets"}};saveWeeklyStore()}}catch(err){console.warn("Không tải được tuần từ máy chủ",err)}}loadWeek(week);toast(state.records.length?`Đã mở TKB tuần ${week}`:`Tuần ${week} chưa có dữ liệu. Hãy nhập Excel hoặc sao chép tuần trước.`,state.records.length?"primary":"warning")}
-async function cloudGet(week){const url=new URL(CLOUD_API_URL);url.searchParams.set("week",String(week));url.searchParams.set("t",String(Date.now()));const r=await fetch(url.toString(),{method:"GET",cache:"no-store"});if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}
-async function cloudSave(){if(!CLOUD_API_URL)return;const token=prompt("Nhập mã quản trị để công bố TKB tuần này cho toàn trường:");if(token===null)return;if(token!==ADMIN_TOKEN){toast("Mã quản trị trên giao diện không khớp cấu hình.","danger");return}const payload={token:token,week:state.week,records:state.records,sourceFile:state.meta.sourceFile||"Cập nhật Excel",updatedBy:"Quản trị"};const r=await fetch(CLOUD_API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)});const result=await r.json();if(!result.ok)throw new Error(result.error||"Không lưu được dữ liệu dùng chung");state.meta={...state.meta,...result.meta};state.weeklyStore[state.week]={records:state.records,meta:state.meta};saveWeeklyStore();updateWeekStatus();toast(`Đã công bố tuần ${state.week} lên dữ liệu dùng chung (${result.count} bản ghi).`)}
-function copyPreviousWeek(){const prev=state.week-1;if(prev<1){toast("Tuần 1 không có tuần trước.","warning");return}const source=state.weeklyStore[prev];if(!source?.records?.length){toast(`Tuần ${prev} chưa có dữ liệu để sao chép.`,"warning");return}if(!confirm(`Sao chép ${source.records.length} bản ghi từ tuần ${prev} sang tuần ${state.week}? Dữ liệu tuần ${state.week} hiện tại sẽ bị thay thế.`))return;state.weeklyStore[state.week]={records:source.records.map(r=>({...r,source:"copied-from-week-"+prev})),meta:{sourceFile:`Sao chép từ tuần ${prev}`,updatedAt:new Date().toISOString(),copiedFrom:prev}};saveWeeklyStore();loadWeek(state.week);toast(`Đã sao chép TKB tuần ${prev} sang tuần ${state.week}`)}
-function clock(){const now=new Date();document.querySelector("#clock").textContent=now.toLocaleTimeString("vi-VN",{hour12:false});document.querySelector("#currentDate").textContent=now.toLocaleDateString("vi-VN",{day:"2-digit",month:"2-digit",year:"numeric"});document.querySelector("#currentDay").textContent=fmtDay(currentDay());const p=periodNow(),n=nextPeriod();document.querySelector("#currentPeriod").textContent=p?`Đang trong tiết ${p.period} · ${p.start}–${p.end}`:n?`Tiết tiếp theo ${n.period} · ${n.start}`:"Ngoài khung giờ tiết học"}
-function navigate(view){state.view=view;document.querySelectorAll(".nav-link").forEach(b=>b.classList.toggle("active",b.dataset.view===view));document.querySelector("#pageTitle").textContent=titles[view][0];document.querySelector("#pageSubtitle").textContent=titles[view][1]+` · Tuần ${state.week}`;sidebar.classList.remove("open");render()}
-function render(){document.querySelector("#recordCount").textContent=`${state.records.length.toLocaleString("vi-VN")} bản ghi`;state.charts.forEach(c=>c?.destroy?.());state.charts=[];if(!state.records.length){root.innerHTML='<div class="panel empty-state"><i class="bi bi-file-earmark-spreadsheet"></i>Chưa có dữ liệu thời khóa biểu. Hãy chọn “Cập nhật TKB” để nhập file Excel.</div>';return}switch(state.view){case"dashboard":state.charts=renderDashboard(root,state.records.filter(r=>r.recordType==="class"),state.meta);break;case"teacher":renderTeacher(root,state.records,{exportPdf});break;case"class":renderClass(root,state.records,{exportPdf});break;case"stats":state.charts=renderDashboard(root,state.records.filter(r=>r.recordType==="class"),state.meta);break;case"rooms":renderRooms();break;case"errors":renderErrors();break;case"settings":renderSettings();break}if(state.view!=="errors")state.errors=validate(state.records);document.querySelector("#errorBadge").textContent=state.errors.length}
-function renderRooms(){const now=periodNow(),day=currentDay();const classRecords=state.records.filter(r=>r.recordType==="class");const rooms=uniq(classRecords.map(r=>r.room));const occupied=now?classRecords.filter(r=>r.day===day&&r.period===now.period&&r.room):[];root.innerHTML=`<div class="panel"><div class="panel-header"><div><h2 class="panel-title">Tình trạng phòng học</h2><div class="panel-subtitle">${now?`Tiết ${now.period} · ${fmtDay(day)}`:"Ngoài khung giờ học"} · ${occupied.length} phòng đang có lịch</div></div><span class="tag">${rooms.length} phòng đã ghi nhận</span></div>${rooms.length?`<div class="room-grid">${rooms.map(room=>{const r=occupied.find(x=>x.room===room);return `<article class="room-card ${r?"busy":""}"><div class="room-status">${r?"● ĐANG SỬ DỤNG":"○ CHƯA CÓ LỊCH HIỆN TẠI"}</div><h3>${esc(room)}</h3><p>Lớp: <b>${esc(r?.class||"—")}</b></p><p>Giáo viên: ${esc(r?.teacher||"—")}</p><p>Môn: ${esc(r?.subject||"—")}</p></article>`}).join("")}</div>`:'<div class="empty-state"><i class="bi bi-door-open"></i>Dữ liệu nguồn chưa có thông tin phòng học. Khi cập nhật tệp có cột phòng, hệ thống sẽ hiển thị tại đây.</div>'}</div><div class="panel"><h2 class="panel-title">Gợi ý dữ liệu</h2><p class="panel-subtitle">Parser tự nhận dạng lớp, môn, giáo viên, thứ và tiết. Thông tin phòng sẽ được lấy khi có trong file nhập.</p></div>`}
-function validate(rows){const errs=[],seenTeacher=new Map(),seenClass=new Map(),seenRoom=new Map();for(const r of rows){const slot=`${r.session||"morning"}|${r.day}|${r.period}`;if((r.recordType==="teacher"||r.teacherInferred)&&r.teacher){const k=r.teacher+"|"+slot;if(seenTeacher.has(k)&&seenTeacher.get(k).class!==r.class)errs.push({type:"Giáo viên trùng tiết",detail:`${r.teacher} được phân công đồng thời ở ${seenTeacher.get(k).class} và ${r.class}`,r});else seenTeacher.set(k,r)}if(r.recordType==="class"&&r.class){const k=r.class+"|"+slot;if(seenClass.has(k)&&seenClass.get(k).subject!==r.subject)errs.push({type:"Lớp trùng tiết",detail:`${r.class} có nhiều môn ở ${fmtDay(r.day)}, tiết ${r.period} (${r.session==="afternoon"?"chiều":"sáng"})`,r});else seenClass.set(k,r);if(r.room){const rk=r.room+"|"+slot;if(seenRoom.has(rk)&&seenRoom.get(rk).class!==r.class)errs.push({type:"Phòng trùng tiết",detail:`${r.room} được dùng bởi ${seenRoom.get(rk).class} và ${r.class}`,r});else seenRoom.set(rk,r)}}if(r.recordType==="class"&&!r.subject)errs.push({type:"Thiếu môn học",detail:`${r.class} · ${fmtDay(r.day)} tiết ${r.period}`,r,warning:true})}return errs}
-function renderErrors(){state.errors=validate(state.records);root.innerHTML=`<div class="panel"><div class="panel-header"><div><h2 class="panel-title">Kết quả kiểm tra dữ liệu</h2><div class="panel-subtitle">Quét xung đột giáo viên, lớp, phòng và trường thông tin còn thiếu</div></div><span class="tag ${state.errors.length?"warning":""}">${state.errors.length} vấn đề</span></div>${state.errors.length?state.errors.slice(0,500).map(e=>`<div class="error-item"><div class="error-icon"><i class="bi ${e.warning?"bi-exclamation-triangle":"bi-shield-exclamation"}"></i></div><div><strong>${esc(e.type)} <span class="tag ${e.warning?"warning":"danger"}">${e.warning?"Cần bổ sung":"Xung đột"}</span></strong><p>${esc(e.detail)}</p></div></div>`).join(""):'<div class="empty-state"><i class="bi bi-shield-check"></i>Không phát hiện xung đột theo các trường dữ liệu hiện có.</div>'}</div><div class="panel"><div class="panel-subtitle">Lưu ý: dữ liệu TKB lớp chỉ có môn học nên bản ghi không có tên giáo viên được đánh dấu thiếu giáo viên; đây không nhất thiết là lỗi phân công.</div></div>`;document.querySelector("#errorBadge").textContent=state.errors.length}
-function renderSettings(){root.innerHTML=`<div class="settings-grid"><section class="panel"><h2 class="panel-title mb-3">Dữ liệu thời khóa biểu</h2><p class="panel-subtitle">Hiện có ${state.records.length} bản ghi · ${uniq(state.records.map(r=>r.teacher)).filter(Boolean).length} giáo viên · ${uniq(state.records.map(r=>r.class)).length} lớp.</p><div class="toolbar mt-3"><button class="btn btn-primary" id="settingsImport"><i class="bi bi-upload"></i> Nhập / cập nhật Excel</button><button class="btn btn-outline-secondary" id="settingsExport"><i class="bi bi-file-earmark-excel"></i> Xuất Excel</button><button class="btn btn-outline-secondary" id="settingsReset">Khôi phục dữ liệu mẫu</button></div></section><section class="panel"><h2 class="panel-title mb-3">Khung giờ tiết học</h2><div class="table-wrap"><table class="data-table"><thead><tr><th>Tiết</th><th>Bắt đầu</th><th>Kết thúc</th></tr></thead><tbody>${PERIODS.map(p=>`<tr><td>${p.period}</td><td>${p.start}</td><td>${p.end}</td></tr>`).join("")}</tbody></table></div><p class="panel-subtitle mt-3">Chỉnh sửa mảng PERIODS trong js/utils.js để phù hợp thời gian biểu thực tế.</p></section><section class="panel"><h2 class="panel-title mb-3">Xuất báo cáo</h2><p class="panel-subtitle">Xuất toàn bộ bản ghi hoặc lưu ảnh nhanh của vùng đang xem.</p><div class="toolbar mt-3"><button class="btn btn-outline-secondary" id="settingsPng">Xuất PNG</button><button class="btn btn-outline-secondary" id="settingsPdf">Xuất PDF</button><button class="btn btn-outline-secondary" id="settingsPrint">In trang</button></div></section><section class="panel"><h2 class="panel-title mb-3">Quyền riêng tư & ngoại tuyến</h2><p class="panel-subtitle">Dữ liệu được xử lý trong trình duyệt. Tệp nhập được lưu cục bộ trong phiên hiện tại; ứng dụng có thể cài đặt PWA khi chạy trên HTTPS hoặc localhost.</p><span class="tag">Client-side</span> <span class="tag">Cloud: ${CLOUD_API_URL?"Đã cấu hình":"Chưa cấu hình"}</span><p class="panel-subtitle mt-2">Khi đã cấu hình Google Apps Script, quản trị nhập Excel rồi xác nhận công bố để mọi thiết bị tải cùng dữ liệu tuần.</p><button class="btn btn-outline-primary mt-2" id="cloudPublishBtn" ${CLOUD_API_URL?"":"disabled"}>Công bố tuần hiện tại lên toàn trường</button><button class="btn btn-outline-secondary mt-2" id="cloudRefreshBtn" ${CLOUD_API_URL?"":"disabled"}>Tải lại tuần từ máy chủ</button></section></div>`;
-root.querySelector("#settingsImport").onclick=()=>document.querySelector("#fileInput").click();root.querySelector("#settingsExport").onclick=()=>exportExcel(state.records);root.querySelector("#settingsReset").onclick=async()=>{if(confirm(`Khôi phục dữ liệu mẫu vào tuần ${state.week}? Dữ liệu tuần này sẽ bị thay thế.`)){const sample=await loadInitialData();state.records=sample.records||[];state.meta={...sample,week:state.week,sourceFile:"Dữ liệu mẫu",updatedAt:new Date().toISOString()};persistCurrentWeek();navigate("dashboard");toast(`Đã khôi phục dữ liệu mẫu cho tuần ${state.week}`)}};root.querySelector("#settingsPng").onclick=()=>downloadPng(root,"smart-timetable.png");root.querySelector("#settingsPdf").onclick=()=>exportPdf(root,"smart-timetable.pdf");root.querySelector("#settingsPrint").onclick=()=>window.print();root.querySelector("#cloudPublishBtn")?.addEventListener("click",()=>cloudSave().catch(e=>toast(e.message,"danger")));root.querySelector("#cloudRefreshBtn")?.addEventListener("click",async()=>{try{const d=await cloudGet(state.week);if(!d.ok)throw Error(d.error||"Không tải được dữ liệu");state.records=d.records||[];state.meta={...state.meta,...(d.meta||{})};persistCurrentWeek();render();toast("Đã tải TKB dùng chung từ máy chủ.")}catch(e){toast(e.message,"danger")}})}
-async function updateFile(e){const files=[...(e.target.files||[])];if(!files.length)return;try{toast("Đang đọc và phân tích các tệp Excel…","primary");const parsed=await parseTimetableFiles(files,state.week);const types=new Set(parsed.reports.map(x=>x.type));const missing=[...[!types.has("teacher")?"TKB giáo viên":null,!types.has("morning")?"TKB lớp sáng":null,!types.has("afternoon")?"TKB lớp chiều":null].filter(Boolean)];if(missing.length)throw new Error("Chưa đủ 3 loại tệp để xuất bản tuần "+state.week+": "+missing.join(", ")+". Dữ liệu hiện tại chưa bị thay đổi.");const report=parsed.reports.map(x=>`${x.file}: ${x.count} bản ghi (${x.type})`).join("\n");const inferred=parsed.records.filter(r=>r.session==="afternoon"&&r.teacherInferred).length;const unknown=parsed.records.filter(r=>r.session==="afternoon"&&r.recordType==="class"&&!r.teacher).length;const detail=`Tuần ${state.week}\n${report}\n\nTổng cộng: ${parsed.records.length} bản ghi.\nTKB giáo viên chiều suy ra được: ${inferred}; ô chưa xác định được giáo viên: ${unknown}.\n\nOK = thay thế dữ liệu tuần hiện tại bằng các tệp đã chọn.\nCancel = gộp dữ liệu vào tuần hiện tại.`;const replace=confirm(detail);state.records=mergeUpdates(state.records,parsed.records,replace?"replace":"merge");state.meta={...state.meta,week:state.week,sourceFile:files.map(f=>f.name).join("; "),updatedAt:new Date().toISOString(),importReports:parsed.reports,importSummary:parsed.summary};persistCurrentWeek();if(CLOUD_API_URL){try{await cloudSave()}catch(cloudErr){console.error(cloudErr);toast("Đã lưu trên máy này nhưng chưa công bố được lên toàn trường: "+cloudErr.message,"danger")}}bindSearch(document.querySelector("#globalSearch"),document.querySelector("#searchResults"),state.records,openSearchResult);state.errors=validate(state.records);render();toast(`Đã nhập tuần ${state.week}: ${parsed.records.length} bản ghi từ ${files.length} tệp`);if(unknown)toast(`${unknown} ô TKB chiều chưa suy ra được giáo viên; nội dung gốc vẫn được giữ lại.`,"warning")}catch(err){console.error(err);toast(err.message||"Không thể đọc tệp","danger")}finally{e.target.value=""}}
-function openSearchResult(x){if(x.view==="teacher"){navigate("teacher");setTimeout(()=>{const s=root.querySelector("#teacherSelect");if(s)s.value=x.name,s.dispatchEvent(new Event("change"))},0)}else if(x.view==="class"){navigate("class");setTimeout(()=>{const s=root.querySelector("#classSelect");if(s)s.value=x.name,s.dispatchEvent(new Event("change"))},0)}else navigate(x.view)}
-function handleHash(){const h=location.hash;if(h.startsWith("#teacher=")){navigate("teacher");setTimeout(()=>{const s=root.querySelector("#teacherSelect");if(s){s.value=decodeURIComponent(h.slice(9));s.dispatchEvent(new Event("change"))}},50)}else if(h.startsWith("#class=")){navigate("class");setTimeout(()=>{const s=root.querySelector("#classSelect");if(s){s.value=decodeURIComponent(h.slice(7));s.dispatchEvent(new Event("change"))}},50)}}
+/* =====================================================================
+ * app.js – Điểm khởi chạy: router, header thời gian thực, dữ liệu, theme, PWA
+ * ===================================================================== */
+import {
+  $, $$, lsGet, lsSet, lsDel, toast, escapeHtml, formatDate, formatTime, dayName, schoolDay, periodInfo,
+  setPeriods, PERIODS, DEFAULT_PERIODS,
+} from './utils.js';
+import { parseFile, loadSampleSources, buildDataset } from './data-loader.js';
+import { renderDashboard, renderStats, destroyCharts } from './dashboard.js';
+import { renderTeacher } from './teacher.js';
+import { renderClass } from './class.js';
+import { renderRooms } from './room.js';
+import { renderCheck, validate } from './validator.js';
+import { renderSettings } from './settings.js';
+import { initGlobalSearch, renderSubject } from './search.js';
+import { renderHistory, saveWeek, getWeek } from './history.js';
+import { isAdmin, login, logout, authEnabled, sessionLeftMinutes } from './auth.js';
+
+const LS = { sources: 'stt2.sources', theme: 'stt2.theme', settings: 'stt2.settings', periods: 'stt2.periods' };
+
+/* ---------- Trạng thái toàn cục ---------- */
+let ds = buildDataset({}, {});
+let deferredInstall = null;
+const ctx = {
+  state: {},                                   // trạng thái giao diện (lớp / GV đang chọn…)
+  sources: { teacher: null, class: null, afternoon: null },     // dữ liệu đã chuẩn hóa theo từng loại file
+  settings: lsGet(LS.settings, { useClassRoom: true, subjectRooms: {} }),
+  theme: 'light',
+  canInstall: () => !!deferredInstall,
+  install, pickFiles, importFiles, reloadSample, clearData, setTheme, savePeriods, saveSettings,
+  isAdmin, authEnabled, sessionLeftMinutes, doLogin, doLogout,
+  rerender: () => route(true), loadWeek, viewPublished,
+};
+
+const VIEWS = {
+  dashboard: renderDashboard,
+  teacher: renderTeacher,
+  class: renderClass,
+  stats: renderStats,
+  rooms: renderRooms,
+  check: renderCheck,
+  settings: renderSettings,
+  history: renderHistory,
+  subject: renderSubject,
+};
+const NEEDS_DATA = new Set(['dashboard', 'teacher', 'class', 'stats', 'rooms', 'check', 'subject']);
+
+/* ---------- Theme ---------- */
+function setTheme(t, rerender = true) {
+  ctx.theme = t;
+  document.documentElement.setAttribute('data-bs-theme', t);
+  lsSet(LS.theme, t);
+  $('#btnTheme i').className = t === 'dark' ? 'bi bi-sun' : 'bi bi-moon-stars';
+  $('meta[name="theme-color"]')?.setAttribute('content', t === 'dark' ? '#0b1220' : '#2563EB');
+  if (rerender) route();
+}
+
+/* ---------- Phân quyền quản trị ---------- */
+/** Chặn thao tác quản trị nếu chưa đăng nhập */
+function guard() {
+  if (isAdmin()) return true;
+  toast('Chức năng này cần đăng nhập quản trị.', 'warning');
+  location.hash = '#/settings';
+  return false;
+}
+/** Cập nhật giao diện theo quyền (nút bên sidebar) */
+function applyAuthUI() {
+  const b = $('#btnImport');
+  if (isAdmin()) b.innerHTML = '<i class="bi bi-upload"></i> Nạp file TKB';
+  else b.innerHTML = '<i class="bi bi-lock"></i> Đăng nhập quản trị';
+}
+async function doLogin(pw) {
+  const r = await login(pw);
+  if (r.ok) {
+    const saved = lsGet(LS.sources);               // quản trị: ưu tiên dữ liệu đang xem trước trên máy này
+    if (saved && (saved.teacher || saved.class || saved.afternoon)) { ctx.sources = { teacher: saved.teacher || null, class: saved.class || null, afternoon: saved.afternoon || null }; rebuild(); }
+    applyAuthUI(); route(); toast('Đã đăng nhập quản trị', 'success');
+  }
+  return r;
+}
+async function doLogout() {
+  logout(); applyAuthUI();
+  await loadPublished();                           // trở lại dữ liệu đã công bố
+  rebuild(); route(); toast('Đã đăng xuất quản trị', 'primary');
+}
+/** Nạp dữ liệu đã công bố (assets/data). Trả về true nếu thành công */
+async function loadPublished() {
+  try { const s = await loadSampleSources(window.XLSX); ctx.sources = { teacher: s.teacher, class: s.class, afternoon: s.afternoon }; return true; }
+  catch { return false; }
+}
+
+/* ---------- Dữ liệu ---------- */
+function rebuild() {
+  ds = buildDataset(ctx.sources, ctx.settings);
+  ctx.state.issueCount = validate(ds).filter((i) => i.sev !== 'info').length;
+  $('#hdSchool').textContent = ds.school;
+  document.title = `Thời khóa biểu – ${ds.school}`;
+  const b = $('#chkBadge');
+  b.textContent = ctx.state.issueCount; b.hidden = !ctx.state.issueCount;
+  updateHeader();
+}
+/** Xem lại một tuần đã lưu (chỉ xem, không ghi đè dữ liệu đã công bố) */
+async function loadWeek(key) {
+  const w = await getWeek(key);
+  if (!w) return toast('Không tìm thấy tuần này', 'danger');
+  ctx.sources = { teacher: w.sources.teacher || null, class: w.sources.class || null, afternoon: w.sources.afternoon || null };
+  rebuild(); location.hash = '#/dashboard'; route();
+  toast(`Đang xem tuần ${w.week} · HK${w.semester} · ${w.year}`, 'primary');
+}
+async function viewPublished() { await loadPublished(); rebuild(); location.hash = '#/dashboard'; route(); toast('Đã quay về dữ liệu công bố', 'primary'); }
+function persist() {
+  if (!lsSet(LS.sources, ctx.sources)) toast('Không lưu được dữ liệu vào thiết bị (bộ nhớ đầy)', 'warning');
+}
+function setBusy(on, msg = 'Đang xử lý…') {
+  const o = $('#busy'); o.hidden = !on; $('#busyMsg').textContent = msg;
+}
+
+async function importFiles(files) {
+  if (!guard()) return;
+  const list = files.filter((f) => /\.(xls|xlsx)$/i.test(f.name));
+  if (!list.length) return toast('Chỉ hỗ trợ file .xls / .xlsx', 'danger');
+  setBusy(true, 'Đang đọc & nhận dạng file…');
+  const t0 = performance.now();
+  try {
+    let got = 0;
+    for (const f of list) {
+      const r = await parseFile(window.XLSX, f);
+      if (r.teacher) { ctx.sources.teacher = r.teacher; got++; toast(`${f.name}: nhận dạng TKB giáo viên (${r.teacher.records.length} tiết, ${r.teacher.teachers.length} GV)`, 'success', 4200); }
+      if (r.class) { ctx.sources.class = r.class; got++; toast(`${f.name}: nhận dạng TKB lớp (${r.class.classes.length} lớp)`, 'success', 4200); }
+      if (r.afternoon) { ctx.sources.afternoon = r.afternoon; got++; toast(`${f.name}: nhận dạng TKB buổi chiều (${r.afternoon.records.length} ô, ${r.afternoon.classes.length} lớp)`, 'success', 4200); }
+      if (!r.teacher && !r.class && !r.afternoon) toast(`${f.name}: không nhận dạng được cấu trúc TKB`, 'danger', 5000);
+    }
+    if (got) { persist(); rebuild(); route(); saveWeek(ctx.sources, ds.meta).then((k) => k && toast('Đã lưu vào lịch sử: ' + k.replace(/\|/g, ' · '), 'success', 3000)).catch(() => {}); toast(`Hoàn tất trong ${Math.round(performance.now() - t0)} ms`, 'primary', 2200); }
+  } catch (e) {
+    console.error(e); toast('Lỗi đọc file: ' + e.message, 'danger', 5000);
+  } finally { setBusy(false); }
+}
+function pickFiles() { if (!guard()) return; const i = $('#fileInput'); i.value = ''; i.click(); }
+
+async function reloadSample() {
+  if (!guard()) return;
+  setBusy(true, 'Đang nạp dữ liệu mẫu…');
+  try {
+    const s = await loadSampleSources(window.XLSX);
+    ctx.sources = { teacher: s.teacher, class: s.class, afternoon: s.afternoon };
+    lsDel(LS.sources); rebuild(); route();
+    toast('Đã nạp lại dữ liệu đã công bố', 'success');
+  } catch (e) {
+    toast('Không nạp được dữ liệu mẫu – hãy mở ứng dụng qua máy chủ web (xem start.bat / start.sh) hoặc chọn file thủ công.', 'warning', 6000);
+  } finally { setBusy(false); }
+}
+function clearData() {
+  if (!guard()) return;
+  ctx.sources = { teacher: null, class: null, afternoon: null };
+  lsDel(LS.sources); rebuild(); route(); toast('Đã xóa dữ liệu lưu trên máy này', 'primary');
+}
+function saveSettings(s) { if (!guard()) return; ctx.settings = s; lsSet(LS.settings, s); rebuild(); route(); }
+function savePeriods(list) { if (!guard()) return; setPeriods(list); lsSet(LS.periods, PERIODS); rebuild(); route(); }
+
+/* ---------- PWA ---------- */
+async function install() {
+  if (!deferredInstall) return toast('Trình duyệt chưa cho phép cài đặt (hoặc ứng dụng đã được cài).', 'warning');
+  deferredInstall.prompt();
+  await deferredInstall.userChoice;
+  deferredInstall = null; $('#btnInstallTop').hidden = true;
+}
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault(); deferredInstall = e; $('#btnInstallTop').hidden = false;
+  if (location.hash.startsWith('#/settings')) $('#btnInstall')?.removeAttribute('disabled');
+});
+window.addEventListener('appinstalled', () => { deferredInstall = null; $('#btnInstallTop').hidden = true; toast('Đã cài đặt ứng dụng', 'success'); });
+
+/* ---------- Header thời gian thực ---------- */
+function weekNumber(now) {
+  if (!ds.meta.week || !ds.meta.start) return 0;
+  const start = new Date(ds.meta.start); start.setHours(0, 0, 0, 0);
+  const today = new Date(now); today.setHours(0, 0, 0, 0);
+  return ds.meta.week + Math.floor((today - start) / (7 * 864e5));
+}
+let lastKey = '';
+let wasAdmin = isAdmin();
+function updateHeader() {
+  if (wasAdmin !== isAdmin()) { wasAdmin = isAdmin(); applyAuthUI(); if (location.hash.startsWith('#/settings')) route(true); }
+  const now = new Date();
+  $('#hdClock').textContent = formatTime(now);
+  $('#hdDate').textContent = formatDate(now);
+  $('#hdDay').textContent = now.getDay() === 0 ? 'Chủ Nhật' : dayName(schoolDay(now));
+  const wk = weekNumber(now);
+  const wEl = $('#hdWeek');
+  wEl.textContent = wk ? `Tuần ${wk}` : '—';
+  wEl.title = ds.meta.week ? `Dữ liệu đang nạp: tuần ${ds.meta.week}${wk !== ds.meta.week ? ' (khác tuần hiện tại)' : ''}` : '';
+  wEl.classList.toggle('chip-warn', !!wk && wk !== ds.meta.week);
+  const pi = periodInfo(now, ds.maxPeriod);
+  let main = '—', sub = '';
+  if (pi.status === 'in') { main = `Tiết ${pi.current.period}`; sub = `${pi.current.start}–${pi.current.end}`; if (pi.next) sub += ` · Tiếp: tiết ${pi.next.period} (${pi.next.start})`; }
+  else if (pi.status === 'break') { main = 'Ra chơi'; sub = `Tiếp: tiết ${pi.next.period} (${pi.next.start})`; }
+  else if (pi.status === 'before') { main = 'Chưa vào học'; sub = `Tiết ${pi.next.period} lúc ${pi.next.start}`; }
+  else if (pi.status === 'off') { main = 'Hôm nay nghỉ'; sub = 'Chủ Nhật'; }
+  else { main = 'Hết giờ học'; }
+  $('#hdPeriod').textContent = main;
+  $('#hdPeriodSub').textContent = sub;
+  $('#hdPeriodBox').classList.toggle('live', pi.status === 'in');
+  // Khi chuyển tiết / chuyển ngày: vẽ lại các trang phụ thuộc thời gian
+  const key = `${pi.day}|${pi.current?.period || pi.status}`;
+  if (lastKey && key !== lastKey && ['dashboard', 'teacher', 'class', 'rooms'].includes(currentView)) route(true);
+  lastKey = key;
+}
+
+/* ---------- Router ---------- */
+let currentView = 'dashboard';
+function route(keepScroll = false) {
+  const m = location.hash.match(/^#\/([^/]*)(?:\/(.*))?$/);
+  const name = VIEWS[m?.[1]] ? m[1] : 'dashboard';
+  const param = m?.[2] || '';
+  currentView = name;
+  $$('#sidebar .nav-link').forEach((a) => a.classList.toggle('active', a.dataset.view === name || (name === 'subject' && a.dataset.view === 'stats')));
+  const host = $('#view');
+  destroyCharts();
+  const y = window.scrollY;
+  try {
+    if (NEEDS_DATA.has(name) && !ds.records.length) renderWelcome(host);
+    else VIEWS[name](host, ds, ctx, param);
+  } catch (e) {
+    console.error(e);
+    host.innerHTML = `<div class="empty-state glass"><i class="bi bi-bug text-danger"></i><p><b>Có lỗi khi hiển thị trang.</b><br><small>${escapeHtml(e.message)}</small></p></div>`;
+  }
+  if (!keepScroll) window.scrollTo(0, 0); else window.scrollTo(0, y);
+  closeSidebar();
+}
+
+function renderWelcome(host) {
+  host.innerHTML = `<div class="welcome glass">
+    <img src="assets/icons/logo.svg" alt="" width="84" height="84">
+    <h2>Chào mừng đến Smart Timetable V2</h2>
+    <p class="text-muted">Nạp file thời khóa biểu (.xls / .xlsx) để bắt đầu. Hệ thống tự nhận dạng TKB giáo viên và TKB lớp, không cần cấu hình.</p>
+    ${isAdmin() ? `<div class="d-flex gap-2 justify-content-center flex-wrap">
+      <button class="btn btn-primary btn-lg" id="wPick"><i class="bi bi-upload"></i> Chọn file Excel</button>
+      <button class="btn btn-outline-primary btn-lg" id="wSample"><i class="bi bi-magic"></i> Nạp dữ liệu đã công bố</button></div>
+    <div class="drop-zone mt-4" id="wDrop"><i class="bi bi-cloud-arrow-up"></i><p class="mb-0">hoặc kéo thả file vào đây</p></div>`
+    : `<p class="text-muted">Hiện chưa có dữ liệu thời khóa biểu. Vui lòng liên hệ quản trị viên.</p>
+       <a class="btn btn-outline-primary" href="#/settings"><i class="bi bi-lock"></i> Đăng nhập quản trị</a>`}</div>`;
+  if (!isAdmin()) return;
+  $('#wPick').onclick = pickFiles;
+  $('#wSample').onclick = reloadSample;
+  const dz = $('#wDrop');
+  ['dragenter', 'dragover'].forEach((e) => dz.addEventListener(e, (ev) => { ev.preventDefault(); dz.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach((e) => dz.addEventListener(e, (ev) => { ev.preventDefault(); dz.classList.remove('over'); }));
+  dz.addEventListener('drop', (ev) => importFiles([...ev.dataTransfer.files]));
+}
+
+/* ---------- Sidebar (mobile) ---------- */
+const openSidebar = () => { $('#sidebar').classList.add('open'); $('#backdrop').hidden = false; };
+function closeSidebar() { $('#sidebar').classList.remove('open'); $('#backdrop').hidden = true; }
+
+/* ---------- Khởi động ---------- */
+async function init() {
+  // Giờ học đã lưu
+  const savedPeriods = lsGet(LS.periods);
+  if (Array.isArray(savedPeriods) && savedPeriods.length) setPeriods(savedPeriods); else setPeriods(DEFAULT_PERIODS);
+
+  // Theme: ưu tiên lựa chọn đã lưu, nếu chưa có theo hệ điều hành
+  setTheme(lsGet(LS.theme) || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'), false);
+
+  // Sự kiện giao diện
+  $('#btnTheme').onclick = () => setTheme(ctx.theme === 'dark' ? 'light' : 'dark');
+  $('#btnMenu').onclick = openSidebar;
+  $('#backdrop').onclick = closeSidebar;
+  $('#btnImport').onclick = () => { if (isAdmin()) pickFiles(); else location.hash = '#/settings'; };
+  applyAuthUI();
+  $('#btnInstallTop').onclick = install;
+  $('#fileInput').onchange = (e) => importFiles([...e.target.files]);
+  window.addEventListener('hashchange', () => route());
+  window.addEventListener('dragover', (e) => e.preventDefault());
+  window.addEventListener('drop', (e) => { if (!e.target.closest?.('.drop-zone')) { e.preventDefault(); if (e.dataTransfer?.files?.length && isAdmin()) importFiles([...e.dataTransfer.files]); } });
+  initGlobalSearch({ input: $('#globalSearch'), panel: $('#searchPanel'), getDataset: () => ds });
+
+  // Dữ liệu: đã lưu → mẫu đi kèm → trống
+  // Người xem luôn thấy dữ liệu đã công bố (assets/data); quản trị đang đăng nhập thì ưu tiên bản xem trước lưu trên máy.
+  const saved = lsGet(LS.sources);
+  const hasSaved = saved && (saved.teacher || saved.class || saved.afternoon);
+  const fromSaved = () => { ctx.sources = { teacher: saved.teacher || null, class: saved.class || null, afternoon: saved.afternoon || null }; };
+  if (isAdmin() && authEnabled() && hasSaved) fromSaved();
+  else if (!(await loadPublished()) && hasSaved) fromSaved();
+  rebuild();
+  saveWeek(ctx.sources, ds.meta, { overwrite: false }).catch(() => {});   // mỗi thiết bị tự tích lũy các tuần đã xem
+  route();
+  setInterval(updateHeader, 1000);
+
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW:', e));
+  }
+}
 init();

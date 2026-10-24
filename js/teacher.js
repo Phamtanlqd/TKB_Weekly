@@ -1,7 +1,145 @@
-import {uniq,esc,initials,fmtDay,currentDay,periodNow,subjectColor} from "./utils.js";
-export function renderTeacher(root,records,actions={}){const teachers=uniq(records.filter(r=>r.recordType==="teacher"||r.teacherInferred).map(r=>r.teacher).filter(Boolean));root.innerHTML=`<div class="filter-row"><select id="teacherSession" class="form-select" aria-label="Buổi học"><option value="morning">Buổi sáng</option><option value="afternoon">Buổi chiều</option></select><select id="teacherSelect" class="form-select"><option value="">— Chọn giáo viên —</option>${teachers.map(t=>`<option>${esc(t)}</option>`).join("")}</select><input id="teacherFilter" class="form-control" placeholder="Lọc nhanh theo tên..." style="max-width:260px"><div class="toolbar ms-auto"><button class="btn btn-outline-secondary" id="teacherViewToggle"><i class="bi bi-file-earmark-spreadsheet"></i> Chế độ bảng Excel</button><button class="btn btn-outline-secondary" id="teacherPrint"><i class="bi bi-printer"></i> In</button><button class="btn btn-outline-secondary" id="teacherPdf"><i class="bi bi-file-pdf"></i> PDF</button><button class="btn btn-outline-secondary" id="teacherQr"><i class="bi bi-qr-code"></i> QR chia sẻ</button></div></div><div id="teacherContent"><div class="empty-state"><i class="bi bi-person-search"></i>Chọn giáo viên để xem thời khóa biểu.</div></div><div class="panel mt-3" id="qrPanel" hidden><div class="panel-header"><h2 class="panel-title">QR chia sẻ thời khóa biểu</h2><button class="btn btn-sm btn-outline-secondary" id="closeQr">Đóng</button></div><div id="qrCode"></div><p class="panel-subtitle mt-2">QR chứa đường dẫn và lựa chọn hiện tại; khi chia sẻ cần cùng truy cập bản triển khai.</p></div>`;
-const sessionSelect=root.querySelector("#teacherSession"),select=root.querySelector("#teacherSelect"),filter=root.querySelector("#teacherFilter");filter.oninput=()=>{const q=filter.value.toLowerCase();[...select.options].forEach((o,i)=>{if(i)o.hidden=!o.text.toLowerCase().includes(q)})};select.onchange=()=>draw(select.value);sessionSelect.onchange=()=>{select.value="";refreshTeachers();draw("")};root.querySelector("#teacherViewToggle").onclick=()=>root.querySelector("#teacherContent").classList.toggle("excel-view");if(actions.initial)select.value=actions.initial;draw(select.value);function refreshTeachers(){const chosen=uniq(records.filter(r=>r.session===sessionSelect.value&&(r.recordType==="teacher"||r.teacherInferred)).map(r=>r.teacher).filter(Boolean));select.innerHTML=`<option value="">— Chọn giáo viên —</option>${chosen.map(t=>`<option>${esc(t)}</option>`).join("")}`}refreshTeachers();
-function draw(name){const content=root.querySelector("#teacherContent");if(!name){content.innerHTML='<div class="empty-state"><i class="bi bi-person-search"></i>Chọn giáo viên để xem thời khóa biểu.</div>';return}const own=records.filter(r=>r.teacher===name&&r.session===sessionSelect.value&&(r.recordType==="teacher"||r.teacherInferred)),subjects=uniq(own.map(r=>r.subject)),classes=uniq(own.map(r=>r.class));content.innerHTML=`<div class="profile-card"><div class="avatar">${esc(initials(name))}</div><div><h2>${esc(name)}</h2><p>${esc(subjects.join(" · ")||"Chưa có thông tin môn học")}</p></div><div class="profile-kpis"><div><strong>${own.length}</strong><span>Tổng số tiết</span></div><div><strong>${classes.length}</strong><span>Số lớp</span></div></div></div><div class="two-col"><section class="panel" id="teacherPrintable"><div class="panel-header"><div><h2 class="panel-title">Thời khóa biểu tuần</h2><div class="panel-subtitle">Tuần hiện tại · Các ô viền xanh là tiết đang diễn ra</div></div></div>${buildTable(own,"teacher")}</section><section class="panel"><div class="panel-header"><div><h2 class="panel-title">Lịch hôm nay</h2><div class="panel-subtitle">${fmtDay(currentDay())} · Theo đồng hồ thiết bị</div></div></div>${todayList(own)}</section></div>`}
-root.querySelector("#teacherPrint").onclick=()=>window.print();root.querySelector("#teacherPdf").onclick=()=>actions.exportPdf?.(root.querySelector("#teacherContent"),"tkb-giao-vien.pdf");root.querySelector("#teacherQr").onclick=()=>{const panel=root.querySelector("#qrPanel");panel.hidden=false;root.querySelector("#qrCode").innerHTML="";new QRCode(root.querySelector("#qrCode"),{text:location.href.split("#")[0]+"#teacher="+encodeURIComponent(select.value),width:160,height:160});};root.querySelector("#closeQr").onclick=()=>root.querySelector("#qrPanel").hidden=true}
-export function buildTable(records,mode="class"){let html='<div class="table-wrap"><table class="timetable"><thead><tr><th>Tiết</th>'+[2,3,4,5,6,7].map(d=>`<th>${fmtDay(d)}</th>`).join("")+'</tr></thead><tbody>';for(let p=1;p<=8;p++){html+=`<tr><td class="period-cell">Tiết ${p}</td>`;for(let d=2;d<=7;d++){const r=records.find(x=>x.day===d&&x.period===p);if(!r){html+='<td><div class="lesson empty"></div></td>';continue}const [bg,fg]=subjectColor(r.subject),now=periodNow(),current=d===currentDay()&&now?.period===p;html+=`<td><div class="lesson ${current?"current":""}" style="--lesson-bg:${bg};--lesson-color:${fg}"><strong>${esc(r.subject)}</strong>${mode==="class"?`<small>${esc(r.teacher||"Chưa rõ GV")}</small>`:`<small>${esc(r.class)}</small>`}<small>${r.room?`Phòng ${esc(r.room)}`:""}</small></div></td>`}html+="</tr>"}return html+"</tbody></table></div>"}
-function todayList(rows){const now=currentDay(),items=rows.filter(r=>r.day===now).sort((a,b)=>a.period-b.period);if(!items.length)return '<div class="empty-state"><i class="bi bi-calendar-check"></i>Không có tiết trong lịch hôm nay.</div>';return `<div class="today-list">${items.map(r=>`<div class="today-item"><span class="period-pill">Tiết ${r.period}</span><div><strong>${esc(r.class)} · ${esc(r.subject)}</strong><small>${r.room?`Phòng ${esc(r.room)} · `:""}${r.period===periodNow()?.period?"Đang diễn ra":r.period<(periodNow()?.period||0)?"Đã kết thúc":"Theo lịch"}</small></div></div>`).join("")}</div>`}
+/* =====================================================================
+ * teacher.js – Trang "TKB Giáo Viên" + khung "Lịch hôm nay" (dùng chung với class.js)
+ * ===================================================================== */
+import {
+  DAYS, PERIODS, escapeHtml, createCombobox, buildGridTable, subjectChip, subjectColor, periodInfo, dayName, formatDate,
+  sessionToggle, wireSessionToggle, periodRange,
+} from './utils.js';
+import { wireExportBar, exportHeader, shareUrl } from './export.js';
+
+export const emptyState = (msg, icon = 'bi-inbox') =>
+  `<div class="empty-state glass"><i class="bi ${icon}"></i><p>${msg}</p>
+   <a class="btn btn-primary" href="#/settings"><i class="bi bi-upload"></i> Nạp file thời khóa biểu</a></div>`;
+
+/**
+ * Khung "Lịch hôm nay".
+ * recs: các bản ghi của đối tượng đang xem; mode = 'teacher' | 'class'
+ */
+export function todayCard(ds, recs, mode) {
+  const now = periodInfo(new Date(), ds.maxPeriod);
+  const isToday = now.day <= 7;
+  const day = isToday ? now.day : 2;
+  const label = isToday ? `Lịch hôm nay – ${dayName(day)} ${formatDate(new Date())}` : `Hôm nay nghỉ (Chủ Nhật) – lịch ${dayName(day)}`;
+  const list = recs.filter((r) => r.day === day).sort((a, b) => a.period - b.period);
+  // "mốc" hiện tại tính theo tiết: đang học = số tiết, giờ ra chơi/chưa vào học = nửa tiết
+  const mark = now.status === 'in' ? now.current.period : now.status === 'after' ? 99 : (now.next?.period ?? 99) - 0.5;
+  const nextP = isToday ? list.find((r) => r.period > mark)?.period : null;
+  const items = list.map((r) => {
+    const per = PERIODS.find((p) => p.period === r.period);
+    const cur = isToday && r.period === mark;
+    const past = isToday && r.period < mark;
+    const nxt = r.period === nextP && !cur;
+    const who = mode === 'teacher' ? escapeHtml(r.class) : (r.event ? '' : escapeHtml(r.teacher || 'Chưa có GV'));
+    const what = mode === 'teacher' ? '' : subjectChip(r.subjectCode, r.subject);
+    return `<li class="today-item ${cur ? 'cur' : ''} ${past ? 'past' : ''} ${nxt ? 'nxt' : ''}" style="--c:${subjectColor(r.subjectCode)}">
+      <div class="ti-p">Tiết ${r.period}</div>
+      <div class="ti-body"><b>${r.event ? escapeHtml(r.eventText) : mode === 'teacher' ? `${who}` : escapeHtml(r.subject)}</b>
+        ${mode === 'teacher' ? `<span>${subjectChip(r.subjectCode, r.subject)}</span>` : `<span class="text-muted">${who}</span>`}
+        <small>${per ? `${per.start}–${per.end}` : ''}${r.room && !r.roomAuto ? ` · ${escapeHtml(r.room)}` : ''}</small></div>
+      ${cur ? '<span class="badge text-bg-success">Đang diễn ra</span>' : nxt ? '<span class="badge text-bg-primary">Tiếp theo</span>' : past ? '<span class="badge text-bg-light">Đã xong</span>' : ''}
+    </li>`;
+  }).join('');
+  return `<div class="glass card-pad today-card h-100">
+    <div class="card-title-row"><h6><i class="bi bi-calendar-day"></i> ${label}</h6></div>
+    ${items ? `<ul class="today-list">${items}</ul>` : '<p class="text-muted mb-0">Không có tiết nào trong ngày.</p>'}
+  </div>`;
+}
+
+/** Ô lịch trong bảng TKB giáo viên */
+function teacherCell(rs) {
+  if (!rs?.length) return '';
+  return rs.map((r) => `<div class="lesson ${rs.length > 1 ? 'clash' : ''}" style="--c:${subjectColor(r.subjectCode)}">
+    <b>${escapeHtml(r.class)}</b><span>${escapeHtml(r.subject)}</span>${r.room && !r.roomAuto ? `<small><i class="bi bi-door-open"></i> ${escapeHtml(r.room)}</small>` : ''}</div>`).join('');
+}
+
+const initials = (n) => n.split(' ').filter(Boolean).slice(-2).map((w) => w[0]).join('').toUpperCase();
+
+export function renderTeacher(host, ds, ctx, param) {
+  if (!ds.teachers.length) { host.innerHTML = `<div class="page-head"><h2><i class="bi bi-person-workspace"></i> TKB Giáo Viên</h2></div>${emptyState('Chưa có dữ liệu giáo viên. Hãy nạp file "TKB giáo viên".')}`; return; }
+  let name = param ? decodeURIComponent(param) : ctx.state.selTeacher;
+  if (!ds.teachers.some((t) => t.name === name)) name = (ds.teachers.find((t) => t.total > 0) || ds.teachers[0]).name;
+  ctx.state.selTeacher = name;
+  const session = ctx.state.session || 'all';
+  const range = periodRange(session, ds.maxPeriod);
+  const idx = ds.teachers.findIndex((t) => t.name === name);
+  const t = ds.teachers[idx];
+  const recs = (ds.byTeacher.get(name) || []).filter((r) => !r.event);
+  const slot = new Map();
+  recs.forEach((r) => { const k = `${r.day}|${r.period}`; const a = slot.get(k); a ? a.push(r) : slot.set(k, [r]); });
+  const days = new Set(recs.map((r) => r.day)).size;
+
+  host.innerHTML = `
+    <div class="page-head">
+      <div><h2><i class="bi bi-person-workspace"></i> TKB Giáo Viên</h2></div>
+      <div class="actions d-flex gap-2 flex-wrap align-items-center">
+        <button class="btn btn-light" id="prevT" title="Giáo viên trước"><i class="bi bi-chevron-left"></i></button>
+        <div id="tCombo" class="cbx-host"></div>
+        <button class="btn btn-light" id="nextT" title="Giáo viên sau"><i class="bi bi-chevron-right"></i></button>
+      </div>
+    </div>
+    <div class="glass card-pad mb-3">
+      <div class="entity-head">
+        <div class="avatar">${escapeHtml(initials(t.name))}</div>
+        <div class="flex-grow-1">
+          <h4 class="mb-1">${escapeHtml(t.name)}</h4>
+          <div>${t.subjectCode ? subjectChip(t.subjectCode, t.subject) : '<span class="text-muted">Chưa rõ môn</span>'}</div>
+        </div>
+        <div class="entity-stats">
+          <div><b>${t.total}</b><span>Tổng số tiết</span></div>
+          <div><b>${t.classes.length}</b><span>Số lớp phụ trách</span></div>
+          <div><b>${days}</b><span>Số ngày dạy</span></div>
+        </div>
+      </div>
+      <div class="mt-3 chips">${t.classes.map((c) => `<a class="chip" href="#/class/${encodeURIComponent(c)}">${escapeHtml(c)}</a>`).join('') || '<span class="text-muted small">Chưa phụ trách lớp nào.</span>'}</div>
+    </div>
+    <div class="row g-3">
+      <div class="col-xl-8">
+        <div class="glass card-pad">
+          <div class="card-title-row"><h6><i class="bi bi-table"></i> Thời khóa biểu tuần</h6>
+            ${sessionToggle(session, ds.maxPeriod)}
+            <div class="export-bar no-export">
+              <button class="btn btn-sm btn-light" data-export="print"><i class="bi bi-printer"></i> In</button>
+              <button class="btn btn-sm btn-light" data-export="pdf"><i class="bi bi-file-earmark-pdf"></i> PDF</button>
+              <button class="btn btn-sm btn-light" data-export="png"><i class="bi bi-image"></i> PNG</button>
+              <button class="btn btn-sm btn-light" data-export="excel"><i class="bi bi-file-earmark-excel"></i> Excel</button>
+              <button class="btn btn-sm btn-primary" data-export="qr"><i class="bi bi-qr-code"></i> QR</button>
+            </div></div>
+          <div id="tExport">
+            ${exportHeader(ds.school, `TKB giáo viên: ${t.name}`, `${t.subject || ''} · ${t.total} tiết/tuần${ds.meta.week ? ` · Tuần ${ds.meta.week}` : ''}`)}
+            ${buildGridTable(ds.maxPeriod, (d, p) => teacherCell(slot.get(`${d}|${p}`)), { id: 'tTable', range })}
+            ${ds.hasAfternoon && session !== 'am' ? '<p class="legend no-export">CK, HSG-CT, HSG-QG, Tự chọn: ký hiệu theo thời khóa biểu buổi chiều của trường.</p>' : ''}
+          </div>
+        </div>
+      </div>
+      <div class="col-xl-4">${todayCard(ds, recs, 'teacher')}</div>
+    </div>`;
+
+  const items = ds.teachers.map((x) => ({ value: x.name, label: x.name, sub: `${x.subject || '—'} · ${x.total} tiết` }));
+  createCombobox(host.querySelector('#tCombo'), {
+    items, value: name, placeholder: 'Tìm giáo viên…',
+    onSelect: (v) => { location.hash = '#/teacher/' + encodeURIComponent(v); },
+  });
+  const go = (d) => { location.hash = '#/teacher/' + encodeURIComponent(ds.teachers[(idx + d + ds.teachers.length) % ds.teachers.length].name); };
+  host.querySelector('#prevT').onclick = () => go(-1);
+  host.querySelector('#nextT').onclick = () => go(1);
+
+  wireSessionToggle(host, ctx);
+  wireExportBar(host, {
+    getEl: () => host.querySelector('#tExport'),
+    getName: () => `tkb-${t.name}`,
+    getAOA: () => [
+      [`TKB giáo viên: ${t.name}`, t.subject, `${t.total} tiết`], [],
+      ['Tiết', ...DAYS.map((d) => d.name)],
+      ...Array.from({ length: range[1] - range[0] + 1 }, (_, k) => k + range[0] - 1).map((i) => [`Tiết ${i + 1}`, ...DAYS.map((d) => (slot.get(`${d.n}|${i + 1}`) || []).map((r) => `${r.class} - ${r.subject}`).join('\n'))]),
+    ],
+    getQR: () => ({
+      title: `TKB ${t.name}`,
+      url: shareUrl('/teacher/' + encodeURIComponent(t.name)),
+      text: `TKB ${t.name} (${t.subject || ''})${ds.meta.week ? ' - Tuan ' + ds.meta.week : ''}\n` +
+        DAYS.map((d) => {
+          const l = recs.filter((r) => r.day === d.n).sort((a, b) => a.period - b.period).map((r) => `T${r.period}:${r.class}`).join(' ');
+          return l ? `${d.short}: ${l}` : '';
+        }).filter(Boolean).join('\n'),
+    }),
+  });
+}
